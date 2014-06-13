@@ -1,21 +1,22 @@
 # EdX Import
-## Makes searching for, downloading, decrypting, and combining EdX Research Data easy.
+A simple bash library that makes searching for, downloading, decrypting, and combining EdX Research Data easier.
 
-## Required Packages
+### Required Packages
  - gpg
  - awscli (via pip; maybe apt?)
  - jq
  - python2 (tested on python 2.7)
 
-## Prerequisite: there should be a valid GPG key passphrase in the following environment variables:
- - EDX_GPG_PASSPHRASE
- - AWS_SECRET_ACCESS_KEY
- - AWS_ACCESS_KEY_ID
+### Before you start
+There should be a valid GPG key passphrase in the following environment variables:
+ EDX_GPG_PASSPHRASE
+ AWS_SECRET_ACCESS_KEY
+ AWS_ACCESS_KEY_ID
 
  You can do this by using the export command.  e.g.
  `export EDX_GPG_PASSPHRASE=abcdefg`
 
-## Sample session:
+### Sample session:
 
 ```
 mkdir s3_data
