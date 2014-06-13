@@ -1,0 +1,172 @@
+#!/bin/bash
+
+# Prerequisite: there should be a valid GPG key passphrase in the
+# environment variable EDX_GPG_PASSPHRASE
+# environment variable AWS_SECRET_ACCESS_KEY
+# environment variable AWS_ACCESS_KEY_ID
+
+# Required Packages
+# gpg
+# awscli (via pip; maybe apt?)
+# jq
+# python2 (tested on python 2.7)
+
+# instructions:
+
+# cd s3_data
+# edx_ls_course_data davidson
+# edx_download_latest tabular
+# edx_download_latest tracking
+# edx_process <the_data_file> <master_data_dir>
+# edx_process <the_data_file> <master_data_dir>
+
+
+function edx_ls_course_data {
+    # lists the available courses for download from all schools.
+    # You can pass the name of a school or date to narrow down the output
+    if [[ $# > 0 ]]; then
+        aws s3 ls s3://course-data |
+        grep -i $1 |
+        sed 's/[[:space:]]/|/g' |
+        tr -s '|' |
+        awk -F "|" '{s=$3/1000000.0; print s"MB\t"$4}'
+    else
+        aws s3 ls s3://course-data |
+        sed 's/[[:space:]]/|/g' |
+        tr -s '|' |
+        awk -F "|" '{s=$3/1000000.0; print s"MB\t"$4}'
+    fi
+}
+
+function edx_take_name {
+    cut -f 2 -s
+}
+
+function edx_download_data {
+    if [[ $# == 1 ]]; then
+        awk -v tgt=$1 '{print "aws s3 cp s3://course-data/"$0 " tgt"}' | sh
+    elif [[ $# > 1 ]]; then
+        echo "$0 : Too many args!"
+        return
+    else
+        awk '{print "aws s3 cp s3://course-data/"$0 " ."}' | sh
+    fi
+}
+
+function edx_download_latest {
+    arg=$1
+    if [[ ! $arg == "tracking" && ! $arg == "tabular" ]]; then
+        echo "argument must be one of [ tracking , tabular ]"
+        return
+    fi
+    if [[ $arg == "tabular" ]]; then
+        arg="davidsonx"
+    fi
+
+    name=`edx_ls_course_data davidson | grep $arg | tail -1 | edx_take_name`
+    if [ -f ./$name ]; then
+        echo "$name already exists in the current directory!  Aborting."
+        return
+    fi
+    echo "Downloading $name to current directory"
+    echo $name | edx_download_data
+}
+
+function edx_download_latest_tabular {
+    edx_ls_course_data davidson | grep tracking | tail -1 | edx_take_name | edx_download_data
+}
+
+function edx_unarchive {
+    filename=$(basename "$1")
+    extension="${filename##*.}"
+    echo $filename
+    echo $extension
+    if [[ $extension == "tar" ]]; then
+        dir=`dirname $1`/`basename $1 .tar`
+        if [ ! -d $dir ]; then
+            mkdir -p $dir
+        fi
+        tar xzvf $1 -C $dir
+    elif [[ $extension == "zip" ]]; then
+        unzip $1 -d `dirname $1`/`basename $1 .zip`
+    else
+        echo "unrecognized file type.  Must be *.tar or *.zip file."
+        return
+    fi
+}
+
+function edx_decrypt {
+    # decrypts the directory in place, appending a .decrypted extension to the file.
+    if [[ $EDX_GPG_PASSPHRASE == "" ]]; then
+        echo "GPG passphrase not yet set.  Do \`export EDX_GPG_PASSPHRASE=your-passphrase\`"
+        return
+    fi
+
+    find $1 -name "*.gpg" | awk -v pp=$EDX_GPG_PASSPHRASE '{print "echo "pp" | gpg --passphrase-fd 0 --output "$0".decrypted --decrypt "$0}' | sh
+}
+
+function edx_combine_tracking {
+    logdir=$1
+    master_file=$2
+    tmp="tmp_file1234"
+    find $logdir -name "*.decrypted" > $tmp
+    cat $tmp| awk -v mf=$master_file '{print "cat "$0" | jq \". + {\\\"logfile\\\":\\\""$0"\\\"}\" -c >> "mf}' | sh
+    echo "combined `cat $tmp | wc -l` files."
+    rm $tmp
+}
+
+function edx_tracking {
+    tracking_arc=$1
+    dest=$2
+    if [[ ! `basename $tracking_arc` =~ tracking\.tar$ ]]; then
+        echo "$tracking_arc is not a tracking archive. Can't move on."
+        return
+    fi
+
+    if [ ! -d $dest ]; then
+        mkdir -p $dest
+    fi
+
+    name=`dirname $tracking_arc`/`basename $tracking_arc .tar`
+
+    edx_unarchive "$tracking_arc"
+    echo "decrypting tracking files..."
+    edx_decrypt "$name"
+    echo "combining tracking files..."
+    #edx_combine_tracking $name $dest/master_tracking.log
+}
+
+function edx_tabular {
+    tabular_arc=$1
+    dest=$2
+
+    if [[ ! `basename $tabular_arc` =~ ^davidsonx ]]; then
+        echo "$tabular_arc is not a tabular archive. Can't move on."
+        return
+    fi
+
+    if [ ! -d $dest ]; then
+        mkdir -p $dest
+    fi
+
+    name=`dirname $tabular_arc`/`basename $tabular_arc .zip`
+
+    edx_unarchive "$tabular_arc"
+    edx_decrypt "$name"
+    find $name -name "*.decrypted" | awk -v dest=$dest '{print "mv "$0" "dest"/`basename "$0" .gpg.decrypted`"}' | sh
+}
+
+function edx_process {
+    f=$1
+    dest=$2
+    echo $f
+    if [[ $f =~ tracking ]]; then
+        edx_tracking $f $dest
+    elif [[ $f =~ davidsonx ]]; then
+        edx_tabular $f $dest
+    else
+        echo "$f cannot be recognized as tabular or tracking file."
+        return
+    fi
+}
+
