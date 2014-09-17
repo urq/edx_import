@@ -6,8 +6,8 @@
 # environment variable AWS_ACCESS_KEY_ID
 
 # Required Packages
-# gpg
-# awscli (via pip; maybe apt?)
+# gnupg
+# awscli (via pip)
 # jq
 # python2 (tested on python 2.7)
 
@@ -44,7 +44,7 @@ function edx_take_name {
 
 function edx_download_data {
     if [[ $# == 1 ]]; then
-        awk -v tgt=$1 '{print "aws s3 cp s3://course-data/"$0 " tgt"}' | sh
+        awk -v tgt=$1 '{print "aws s3 cp s3://course-data/"$0" "tgt}' | sh
     elif [[ $# > 1 ]]; then
         echo "$0 : Too many args!"
         return
